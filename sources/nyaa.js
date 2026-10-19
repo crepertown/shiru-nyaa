@@ -40,7 +40,7 @@ export default new class Nyaa extends AbstractSource {
   // Palabras que indican subtítulos en español. Los resultados cuyo título las
   // contiene se muestran primero (no se descartan los demás).
   // Déjalo vacío ([]) para desactivar el orden por idioma.
-  languages = ['spanish', 'spa', 'esp', 'latino', 'castellano', 'multi', 'multiple']
+  languages = ['spanish', 'spa', 'esp', 'latino', 'castellano', 'multi', 'multisub', 'multisubs', 'multiple']
 
   _lang () {
     const words = this.languages.map(clean).filter(Boolean)
