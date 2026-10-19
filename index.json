@@ -2,7 +2,7 @@
   {
     "id": "nyaa-rss-personal",
     "name": "Nyaa (RSS)",
-    "version": "0.0.2",
+    "version": "0.0.3",
     "main": "sources/nyaa.js",
     "update": "gh:crepertown/shiru-nyaa",
     "type": "torrent",
@@ -10,9 +10,6 @@
     "accuracy": "medium",
     "unregulated": true,
     "nsfw": false,
-    "regions": [
-      "US"
-    ],
     "description": "Busca en el feed RSS de nyaa.si usando los títulos, el episodio y la resolución que pide Shiru."
   }
 ]
