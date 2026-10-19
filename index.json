@@ -4,7 +4,7 @@
     "name": "Nyaa (RSS)",
     "version": "0.0.1",
     "main": "sources/nyaa.js",
-    "update": "gh:TU_USUARIO/TU_REPO",
+    "update": "gh:crepertown/shiru-nyaa",
     "type": "torrent",
     "speed": "fast",
     "accuracy": "medium",
