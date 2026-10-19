@@ -2,7 +2,7 @@
   {
     "id": "nyaa-rss-personal",
     "name": "Nyaa (RSS)",
-    "version": "0.0.3",
+    "version": "0.0.4",
     "main": "sources/nyaa.js",
     "update": "gh:crepertown/shiru-nyaa",
     "type": "torrent",
@@ -11,5 +11,18 @@
     "unregulated": true,
     "nsfw": false,
     "description": "Busca en el feed RSS de nyaa.si usando los títulos, el episodio y la resolución que pide Shiru."
+  },
+  {
+    "id": "tokyotosho-rss-personal",
+    "name": "Tokyo Toshokan (RSS)",
+    "version": "0.0.1",
+    "main": "sources/tokyotosho.js",
+    "update": "gh:crepertown/shiru-nyaa",
+    "type": "torrent",
+    "speed": "moderate",
+    "accuracy": "medium",
+    "unregulated": true,
+    "nsfw": false,
+    "description": "Busca en el feed RSS de Tokyo Toshokan, que reúne releases de Nyaa, AniRena y otras fuentes. No publica semillas."
   }
 ]
