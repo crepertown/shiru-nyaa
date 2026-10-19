@@ -2,9 +2,9 @@
   {
     "id": "nyaa-rss-personal",
     "name": "Nyaa (RSS)",
-    "version": "0.0.1",
+    "version": "0.0.2",
     "main": "sources/nyaa.js",
-    "update": "gh:crepertown/shiru-nyaa",
+    "update": "gh:TU_USUARIO/TU_REPO",
     "type": "torrent",
     "speed": "fast",
     "accuracy": "medium",
