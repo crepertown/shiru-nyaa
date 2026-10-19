@@ -1,140 +1,148 @@
-import AbstractSource from './abstract.js'
+// Verificador de resultados: decide si el título de un release corresponde
+// exactamente al anime, temporada y episodio que pidió Shiru.
+// Regla general: ante la duda se descarta (mejor menos resultados que mezclados).
 
-// Trackers añadidos al magnet generado a partir del infoHash.
-const TRACKERS = [
-  'http://nyaa.tracker.wf:7777/announce',
-  'udp://open.stat.eu:1337/announce',
-  'udp://tracker.opentrackr.org:1337/announce',
-  'udp://exodus.desync.com:6969/announce'
-]
+const EXT = /\.(mkv|mp4|avi|ts|m2ts)$/i
 
-const UNITS = { b: 1, kib: 1024, mib: 1024 ** 2, gib: 1024 ** 3, tib: 1024 ** 4 }
+// Minúsculas, sin acentos ni apóstrofes, solo letras y números separados por espacios.
+export const norm = (s) => String(s ?? '').toLowerCase().normalize('NFKD')
+  .replace(/[̀-ͯ]/g, '').replace(/['’`]/g, '')
+  .replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 
-const decode = (s) => s
-  .replace(/&lt;/g, '<')
-  .replace(/&gt;/g, '>')
-  .replace(/&quot;/g, '"')
-  .replace(/&#0?39;/g, "'")
-  .replace(/&amp;/g, '&')
+const SEASON_RES = [/\bseason (\d{1,2})\b/, /\b(\d{1,2})(?:st|nd|rd|th) season\b/, /\bs(\d{1,2})\b/]
 
-// Extrae el contenido de una etiqueta del XML (sin DOMParser: en un Web Worker no existe).
-const tag = (xml, name) => {
-  const m = xml.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`))
-  if (!m) return ''
-  return decode(m[1].trim().replace(/^<!\[CDATA\[([\s\S]*)\]\]>$/, '$1'))
+// "frieren 2nd season" -> { base: "frieren", season: 2 }
+export const splitSeason = (n) => {
+  for (const re of SEASON_RES) {
+    const m = n.match(re)
+    if (m) return { base: n.replace(re, ' ').replace(/\s+/g, ' ').trim(), season: Number(m[1]) }
+  }
+  return { base: n, season: undefined }
 }
 
-// "1.4 GiB" -> bytes
-const toBytes = (str) => {
-  const m = str.match(/([\d.]+)\s*([KMGT]?i?B)/i)
-  return m ? Math.round(parseFloat(m[1]) * (UNITS[m[2].toLowerCase()] || 1)) : 0
+// Títulos conocidos del anime (Shiru + AniList), normalizados y sin duplicados.
+export function buildKnown (options = {}) {
+  const t = options.media?.title || {}
+  const raw = [...(options.titles || []), t.romaji, t.english, t.native, ...(options.media?.synonyms || [])]
+  const seen = new Set()
+  const out = []
+  for (const r of raw) {
+    const full = norm(r)
+    if (full.length < 3 || seen.has(full)) continue
+    seen.add(full)
+    out.push({ full, ...splitSeason(full) })
+  }
+  return out
 }
 
-// Quita caracteres que rompen la sintaxis de búsqueda de Nyaa.
-const clean = (s) => String(s ?? '').replace(/[^\p{L}\p{N}\s'-]/gu, ' ').replace(/\s+/g, ' ').trim()
+// Lee el título de un release: nombre, temporada, episodio o rango.
+export function parseRelease (title) {
+  const t = String(title ?? '').replace(EXT, '').replace(/^\s*(\[[^\]]*\]\s*)+/, '').trim()
 
-export default new class Nyaa extends AbstractSource {
-  url = 'https://nyaa.si'
-  category = '1_0' // Todo el anime. ('1_2' = solo inglés, '1_3' = otros idiomas, '1_4' = raws)
+  // Se quitan datos técnicos (resolución, códecs, hash, año) para no confundirlos con el episodio.
+  const body = t
+    .replace(/[\[(](?:19|20)\d{2}[\])]/g, ' ')
+    .replace(/\[[0-9a-f]{8}\]/gi, ' ')
+    .replace(/\b\d{3,4}p\b/gi, ' ')
+    .replace(/\b\d{3,4}x\d{3,4}\b/gi, ' ')
+    .replace(/\b[xh]\.?26[45]\b/gi, ' ')
+    .replace(/\b(?:aac|ddp?|eac3|ac3|flac|opus)\s?\d(?:\.\d)?\b/gi, ' ')
+    .replace(/\b\d{1,2}\s?bit\b/gi, ' ')
+    .replace(/\b\d\.\d\b/g, ' ')
 
-  // Palabras que indican subtítulos en español. Los resultados cuyo título las
-  // contiene se muestran primero (no se descartan los demás).
-  // Déjalo vacío ([]) para desactivar el orden por idioma.
-  languages = ['spanish', 'spa', 'esp', 'latino', 'castellano', 'multi', 'multisub', 'multisubs', 'multiple']
-
-  _lang () {
-    const words = this.languages.map(clean).filter(Boolean)
-    return words.length ? `(${words.join('|')})` : ''
+  let season, episode, range
+  let cut = body.length
+  const find = (re) => {
+    const m = body.match(re)
+    if (m && m.index < cut) cut = m.index
+    return m
   }
 
-  _isLang (title) {
-    const words = this.languages.map(clean).filter(Boolean)
-    return words.length ? new RegExp(`\\b(${words.join('|')})\\b`, 'i').test(title) : false
+  let m
+  if ((m = find(/(?<![\d.])(\d{1,4})(?:-|~)(\d{1,4})(?![\d.])/)) && Number(m[2]) > Number(m[1])) {
+    range = [Number(m[1]), Number(m[2])]
+  } else if ((m = find(/\bS(\d{1,2})\s?E(\d{1,4})(?:v\d)?\b/i))) {
+    season = Number(m[1]); episode = Number(m[2])
+  } else if ((m = find(/\b(\d{1,2})x(\d{1,3})\b/i))) {
+    season = Number(m[1]); episode = Number(m[2])
+  } else if ((m = find(/\b(?:episode|ep)\.?\s?(\d{1,4})(?:v\d)?\b|\bE(\d{1,4})(?:v\d)?\b/i))) {
+    episode = Number(m[1] ?? m[2])
+  } else if ((m = find(/(?:^|\s)-\s(\d{1,4})(?:v\d)?(?=\s|$|\[|\()/))) {
+    episode = Number(m[1])
   }
 
-  // Títulos de Shiru + títulos y sinónimos de AniList (a veces incluyen el título en español).
-  _titleList ({ titles = [], media } = {}) {
-    const t = media?.title || {}
-    const all = [...titles, t.romaji, t.english, ...(media?.synonyms || [])]
-    return [...new Set(all.map(clean).filter(Boolean))].slice(0, 10)
+  // Nombre = texto antes del episodio y antes del primer corchete o paréntesis.
+  let head = body.slice(0, cut)
+  head = head.split(/[\[(]/)[0]
+  const names = head.split(/\s[|\/]\s/).map(norm).filter(Boolean).map(full => ({ full, ...splitSeason(full) }))
+
+  return {
+    names,
+    season: season ?? names.find(n => n.season !== undefined)?.season,
+    episode,
+    range,
+    batch: /\b(batch|complete|completa|collection)\b/i.test(t)
+  }
+}
+
+// ¿Este release es exactamente lo que se pidió?
+//   mode: 'single' | 'batch' | 'movie'
+//   strict: si es true, sin marcador de temporada en una secuela solo se acepta numeración absoluta.
+export function acceptRelease (rel, options, mode, known = buildKnown(options), strict = true) {
+  const num = (v) => Number.isFinite(v)
+  const abs = options.absoluteEpisode
+  const wanted = [options.episode, abs].filter(num)
+  const oneShot = options.media?.episodes === 1 || options.episodeCount === 1 || options.media?.format === 'MOVIE'
+
+  // Candidatos de lectura. Si el título no marca el episodio ("One Piece 1180"), también se
+  // prueba el número final como episodio, solo si tiene 2 o más cifras (un "2" suelto
+  // suele ser una secuela: "Boku no Hero Academia 2").
+  const cands = []
+  for (const n of rel.names) {
+    cands.push({ n, episode: rel.episode })
+    const tail = rel.episode == null && !rel.range && n.full.match(/^(.+?) (\d{2,4})$/)
+    if (tail) cands.push({ n: { full: tail[1], ...splitSeason(tail[1]) }, episode: Number(tail[2]) })
   }
 
-  _exclusions (exclusions = []) {
-    return exclusions.map(e => `-${clean(e).replace(/\s+/g, '')}`).filter(e => e.length > 1).join(' ')
-  }
+  for (const { n, episode } of cands) {
+    for (const k of known) {
+      const exact = n.full === k.full
+      if (!exact && n.base !== k.base) continue // otro anime (p. ej. "One Piece Heroines")
 
-  async _search (query, type) {
-    const res = await fetch(
-      `${this.url}/?page=rss&q=${encodeURIComponent(query)}&c=${this.category}&f=0&s=seeders&o=desc`
-    )
-    if (!res?.ok) return []
+      const ks = k.season ?? options.season ?? 1 // temporada que se busca
+      const rs = rel.season // temporada que dice el release
+      if (rs === 0 && options.season !== 0) continue // especiales
+      if (rs !== undefined && rs !== ks && !(exact && rel.season === n.season)) continue // otra temporada
 
-    const xml = await res.text()
-    const items = xml.match(/<item>[\s\S]*?<\/item>/g) || []
+      // Secuela sin marcador de temporada: solo se puede verificar con numeración absoluta.
+      const needsAbs = strict && !exact && rs === undefined && ks > 1
 
-    return items.map(item => {
-      const title = tag(item, 'title')
-      const hash = tag(item, 'nyaa:infoHash').toLowerCase()
-      const id = Number((tag(item, 'guid').match(/view\/(\d+)/) || [])[1]) || undefined
-      const trackers = TRACKERS.map(t => `&tr=${encodeURIComponent(t)}`).join('')
-
-      return {
-        title,
-        link: `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(title)}${trackers}`,
-        id,
-        seeders: Number(tag(item, 'nyaa:seeders')) || 0,
-        leechers: Number(tag(item, 'nyaa:leechers')) || 0,
-        downloads: Number(tag(item, 'nyaa:downloads')) || 0,
-        accuracy: 'medium',
-        hash,
-        size: toBytes(tag(item, 'nyaa:size')),
-        date: new Date(tag(item, 'pubDate')),
-        type
+      if (mode === 'movie') {
+        if (rel.range || (episode != null && !oneShot)) continue
+        return true
       }
-    }).filter(r => r.hash)
-  }
 
-  // Hace una búsqueda general y otra con palabras de idioma, une los resultados
-  // sin repetir y pone primero los que mencionan español.
-  async _find (options, middle, type) {
-    const titles = `(${this._titleList(options).map(t => `"${t}"`).join('|')})`
-    const tail = [options.resolution, this._exclusions(options.exclusions)]
-    const lang = this._lang()
+      if (mode === 'batch') {
+        if (episode != null) continue
+        if (rel.range) {
+          const check = needsAbs ? [abs].filter(num) : wanted
+          if (check.length && !check.some(w => w >= rel.range[0] && w <= rel.range[1])) continue
+        } else if (needsAbs) continue
+        return true
+      }
 
-    const queries = [[titles, ...middle, ...tail]]
-    if (lang) queries.push([titles, ...middle, lang, ...tail])
-
-    const lists = await Promise.all(
-      queries.map(q => this._search(q.filter(Boolean).join(' '), type).catch(() => []))
-    )
-
-    const unique = new Map()
-    for (const r of lists.flat()) if (!unique.has(r.hash)) unique.set(r.hash, r)
-
-    return [...unique.values()]
-      .map(r => ({ r, es: this._isLang(r.title) }))
-      .sort((a, b) => (b.es - a.es) || (b.r.seeders - a.r.seeders))
-      .map(({ r, es }) => ({ ...r, type: type === 'batch' ? 'batch' : (es ? 'best' : 'alt') }))
-  }
-
-  async single (options) {
-    const ep = options.episode != null ? String(options.episode).padStart(2, '0') : ''
-    return this._find(options, [ep], 'alt')
-  }
-
-  async batch (options) {
-    return this._find(options, ['(batch|complete)'], 'batch')
-  }
-
-  async movie (options) {
-    return this._find(options, [], 'alt')
-  }
-
-  async validate () {
-    try {
-      return (await fetch(`${this.url}/?page=rss&q=test&c=${this.category}`))?.ok === true
-    } catch {
-      return false
+      // single
+      if (rel.range) continue
+      if (episode == null) {
+        if (!oneShot) continue
+        return true
+      }
+      let ok
+      if (needsAbs) ok = num(abs) && abs !== options.episode && episode === abs
+      else if (rs !== undefined) ok = episode === options.episode || (ks === 1 && episode === abs)
+      else ok = wanted.includes(episode)
+      if (ok) return true
     }
   }
-}()
+  return false
+}
