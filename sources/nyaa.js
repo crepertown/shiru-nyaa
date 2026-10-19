@@ -35,7 +35,16 @@ const clean = (s) => String(s).replace(/[^\p{L}\p{N}\s'-]/gu, ' ').replace(/\s+/
 
 export default new class Nyaa extends AbstractSource {
   url = 'https://nyaa.si'
-  category = '1_2' // Anime - English-translated. Usa '1_0' para todo el anime.
+  category = '1_0' // Todo el anime. ('1_2' = solo inglés, '1_3' = otros idiomas, '1_4' = raws)
+
+  // Palabras que debe tener el título para priorizar subs en español.
+  // Déjalo vacío ([]) para desactivar el filtro de idioma.
+  languages = ['spanish', 'spa', 'esp', 'latino', 'multi', 'multiple']
+
+  _lang () {
+    const words = this.languages.map(clean).filter(Boolean)
+    return words.length ? `(${words.join('|')})` : ''
+  }
 
   _titles (titles = []) {
     const unique = [...new Set(titles.map(clean).filter(Boolean))].slice(0, 6)
@@ -79,19 +88,19 @@ export default new class Nyaa extends AbstractSource {
 
   async single ({ titles, episode, resolution, exclusions }) {
     const ep = episode != null ? String(episode).padStart(2, '0') : ''
-    const query = [this._titles(titles), ep, resolution, this._exclusions(exclusions)]
+    const query = [this._titles(titles), ep, this._lang(), resolution, this._exclusions(exclusions)]
       .filter(Boolean).join(' ')
     return this._search(query, 'alt')
   }
 
   async batch ({ titles, resolution, exclusions }) {
-    const query = [this._titles(titles), '(batch|complete)', resolution, this._exclusions(exclusions)]
+    const query = [this._titles(titles), '(batch|complete)', this._lang(), resolution, this._exclusions(exclusions)]
       .filter(Boolean).join(' ')
     return this._search(query, 'batch')
   }
 
   async movie ({ titles, resolution, exclusions }) {
-    const query = [this._titles(titles), resolution, this._exclusions(exclusions)]
+    const query = [this._titles(titles), this._lang(), resolution, this._exclusions(exclusions)]
       .filter(Boolean).join(' ')
     return this._search(query, 'alt')
   }
