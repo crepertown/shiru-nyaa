@@ -31,24 +31,32 @@ const toBytes = (str) => {
 }
 
 // Quita caracteres que rompen la sintaxis de búsqueda de Nyaa.
-const clean = (s) => String(s).replace(/[^\p{L}\p{N}\s'-]/gu, ' ').replace(/\s+/g, ' ').trim()
+const clean = (s) => String(s ?? '').replace(/[^\p{L}\p{N}\s'-]/gu, ' ').replace(/\s+/g, ' ').trim()
 
 export default new class Nyaa extends AbstractSource {
   url = 'https://nyaa.si'
   category = '1_0' // Todo el anime. ('1_2' = solo inglés, '1_3' = otros idiomas, '1_4' = raws)
 
-  // Palabras que debe tener el título para priorizar subs en español.
-  // Déjalo vacío ([]) para desactivar el filtro de idioma.
-  languages = ['spanish', 'spa', 'esp', 'latino', 'multi', 'multiple']
+  // Palabras que indican subtítulos en español. Los resultados cuyo título las
+  // contiene se muestran primero (no se descartan los demás).
+  // Déjalo vacío ([]) para desactivar el orden por idioma.
+  languages = ['spanish', 'spa', 'esp', 'latino', 'castellano', 'multi', 'multiple']
 
   _lang () {
     const words = this.languages.map(clean).filter(Boolean)
     return words.length ? `(${words.join('|')})` : ''
   }
 
-  _titles (titles = []) {
-    const unique = [...new Set(titles.map(clean).filter(Boolean))].slice(0, 6)
-    return `(${unique.map(t => `"${t}"`).join('|')})`
+  _isLang (title) {
+    const words = this.languages.map(clean).filter(Boolean)
+    return words.length ? new RegExp(`\\b(${words.join('|')})\\b`, 'i').test(title) : false
+  }
+
+  // Títulos de Shiru + títulos y sinónimos de AniList (a veces incluyen el título en español).
+  _titleList ({ titles = [], media } = {}) {
+    const t = media?.title || {}
+    const all = [...titles, t.romaji, t.english, ...(media?.synonyms || [])]
+    return [...new Set(all.map(clean).filter(Boolean))].slice(0, 10)
   }
 
   _exclusions (exclusions = []) {
@@ -86,23 +94,40 @@ export default new class Nyaa extends AbstractSource {
     }).filter(r => r.hash)
   }
 
-  async single ({ titles, episode, resolution, exclusions }) {
-    const ep = episode != null ? String(episode).padStart(2, '0') : ''
-    const query = [this._titles(titles), ep, this._lang(), resolution, this._exclusions(exclusions)]
-      .filter(Boolean).join(' ')
-    return this._search(query, 'alt')
+  // Hace una búsqueda general y otra con palabras de idioma, une los resultados
+  // sin repetir y pone primero los que mencionan español.
+  async _find (options, middle, type) {
+    const titles = `(${this._titleList(options).map(t => `"${t}"`).join('|')})`
+    const tail = [options.resolution, this._exclusions(options.exclusions)]
+    const lang = this._lang()
+
+    const queries = [[titles, ...middle, ...tail]]
+    if (lang) queries.push([titles, ...middle, lang, ...tail])
+
+    const lists = await Promise.all(
+      queries.map(q => this._search(q.filter(Boolean).join(' '), type).catch(() => []))
+    )
+
+    const unique = new Map()
+    for (const r of lists.flat()) if (!unique.has(r.hash)) unique.set(r.hash, r)
+
+    return [...unique.values()]
+      .map(r => ({ r, es: this._isLang(r.title) }))
+      .sort((a, b) => (b.es - a.es) || (b.r.seeders - a.r.seeders))
+      .map(({ r, es }) => ({ ...r, type: type === 'batch' ? 'batch' : (es ? 'best' : 'alt') }))
   }
 
-  async batch ({ titles, resolution, exclusions }) {
-    const query = [this._titles(titles), '(batch|complete)', this._lang(), resolution, this._exclusions(exclusions)]
-      .filter(Boolean).join(' ')
-    return this._search(query, 'batch')
+  async single (options) {
+    const ep = options.episode != null ? String(options.episode).padStart(2, '0') : ''
+    return this._find(options, [ep], 'alt')
   }
 
-  async movie ({ titles, resolution, exclusions }) {
-    const query = [this._titles(titles), this._lang(), resolution, this._exclusions(exclusions)]
-      .filter(Boolean).join(' ')
-    return this._search(query, 'alt')
+  async batch (options) {
+    return this._find(options, ['(batch|complete)'], 'batch')
+  }
+
+  async movie (options) {
+    return this._find(options, [], 'alt')
   }
 
   async validate () {
